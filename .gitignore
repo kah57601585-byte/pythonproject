@@ -1,0 +1,13 @@
+# virtual environment runtime (source files inside .venv/ are still tracked)
+.venv/bin/
+.venv/lib/
+.venv/include/
+.venv/pyvenv.cfg
+
+# caches
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+
+# OS
+**/.DS_Store
