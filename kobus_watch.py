@@ -1,24 +1,27 @@
-"""고속버스(KOBUS) 취소표 감시 + 알림 스크립트.
+"""서울경부 -> 속초 고속버스 취소표 감시 + 알림 스크립트.
 
 고속버스 잔여석을 알려주는 공식 Open API는 없다.
-(공공데이터포털 TAGO 고속버스정보 API는 시간표·요금만 주고 잔여석은 없음)
+(공공데이터포털 버스 API에는 고속버스 잔여석 정보가 없음)
 그래서 고속버스통합예매(kobus.co.kr) 웹이 내부적으로 쓰는 요청을 그대로 흉내 내서
-원하는 노선/날짜/시간대의 잔여석을 주기적으로 확인하고, 자리가 생기면 알림을 보낸다.
+서울경부 -> 속초 노선의 원하는 날짜/시간대 잔여석을 주기적으로 확인하고,
+자리가 생기면 알림을 보낸다.
 
 흐름
   1. GET  /main.do               : 세션 쿠키 발급
-  2. POST /mrs/alcnSrch.do       : 배차 조회(HTML) -> fnSatsChc('...') 인자로 배차 목록 파싱
-  3. POST /mrs/satschc.do        : 배차별 좌석 선택 화면 -> rmnSatsNum(잔여석) 확인
-  4. 잔여석이 0 -> 1 이상으로 바뀐 배차가 있으면 텔레그램 / ntfy 로 알림
+  2. POST /mrs/readRotLinInf.ajax: 노선 목록에서 속초 터미널 코드 찾기 (시작할 때 한 번)
+  3. POST /mrs/alcnSrch.do       : 배차 조회(HTML) -> fnSatsChc('...') 인자로 배차 목록 파싱
+  4. POST /mrs/satschc.do        : 배차별 좌석 선택 화면 -> rmnSatsNum(잔여석) 확인
+  5. 잔여석이 0 -> 1 이상으로 바뀐 배차가 있으면 텔레그램 / ntfy 로 알림
 
 예매(좌석 선점·결제)는 하지 않는다. 알림 받으면 앱/웹에서 직접 예매할 것.
 요청 간격은 기본 60초 이상으로 두고, 개인 용도로만 사용하자.
 
 사용 예
-  # 터미널 코드 찾기
-  python kobus_watch.py terminals 부산
-  # 서울경부(010) -> 부산(700), 10/10 17~21시 출발 감시
-  python kobus_watch.py watch --depart 010 --arrive 700 --date 20261010 --from 17 --to 21
+  # 10/10 17~21시 출발 서울경부 -> 속초 감시
+  python kobus_watch.py --date 20261010 --from 17 --to 21
+  # 속초 코드 자동 탐색이 실패하면: 코드 확인 후 직접 지정
+  python kobus_watch.py --find-code
+  python kobus_watch.py --date 20261010 --arrive-code <속초코드>
 
 알림 설정(환경변수, 둘 중 하나 이상)
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID : 텔레그램 봇
@@ -47,6 +50,10 @@ UA = (
 )
 TIMEOUT = 20
 MIN_INTERVAL = 30  # 초. 이보다 짧게 두드리면 차단당하기 쉽다.
+
+DEPART_CODE = "010"  # 서울경부
+DEPART_NAME = "서울경부"
+ARRIVE_NAME = "속초"
 
 # 실제 호출만 잡도록 '(' 바로 뒤에 따옴표가 오는 것만 매칭.
 # (응답 HTML 주석 안에 fnSatsChc(deprTime, ...) 형태의 템플릿이 있음)
@@ -153,6 +160,27 @@ def in_time_window(hhmmss: str, start_hour: int, end_hour: int) -> bool:
     return start_hour <= hour <= end_hour
 
 
+def find_terminal_codes(routes: list[dict], name: str) -> dict[str, str]:
+    """노선 목록(readRotLinInf.ajax 의 rotInfList)에서 이름에 name 이 들어간 터미널의 {코드: 이름}.
+
+    응답 필드 이름이 공개돼 있지 않아서, xxxNm 필드와 짝이 되는 xxxCd / xxxNo 필드를 찾는 식으로 본다.
+    """
+    found: dict[str, str] = {}
+    for rec in routes:
+        if not isinstance(rec, dict):
+            continue
+        for key, val in rec.items():
+            if not (isinstance(val, str) and key.lower().endswith("nm") and name in val):
+                continue
+            prefix = key[:-2]
+            for suffix in ("Cd", "CD", "cd", "No", "NO", "no"):
+                code = rec.get(prefix + suffix)
+                if code:
+                    found[str(code)] = val
+                    break
+    return found
+
+
 # ---- KOBUS 요청 ----
 
 class Kobus:
@@ -249,17 +277,30 @@ def notify(title: str, message: str) -> None:
 
 # ---- 명령 ----
 
-def cmd_terminals(args: argparse.Namespace) -> None:
-    kobus = Kobus()
-    kobus.start()
-    for route in kobus.routes():
+def resolve_arrive_code(kobus: Kobus) -> str:
+    codes = find_terminal_codes(kobus.routes(), ARRIVE_NAME)
+    if len(codes) == 1:
+        code, name = next(iter(codes.items()))
+        print(f"속초 터미널 코드: {code} ({name})")
+        return code
+    if not codes:
+        sys.exit("속초 터미널 코드를 자동으로 못 찾았다. --find-code 로 확인 후 --arrive-code 로 지정할 것.")
+    listing = ", ".join(f"{c}({n})" for c, n in codes.items())
+    sys.exit(f"속초 후보가 여러 개다: {listing}\n--arrive-code 로 하나 골라서 지정할 것.")
+
+
+def cmd_find_code(kobus: Kobus) -> None:
+    """속초가 들어간 노선 원본 레코드를 그대로 출력 (코드 확인용)."""
+    routes = kobus.routes()
+    for route in routes:
         line = json.dumps(route, ensure_ascii=False)
-        if args.keyword in line:
+        if ARRIVE_NAME in line:
             print(line)
+    print("자동 탐색 결과:", find_terminal_codes(routes, ARRIVE_NAME) or "없음")
 
 
 def check_once(kobus: Kobus, args: argparse.Namespace) -> list[Schedule]:
-    body, schedules = kobus.search(args.depart, args.arrive, args.date)
+    body, schedules = kobus.search(DEPART_CODE, args.arrive_code, args.date)
     available = []
     for sch in schedules:
         if not in_time_window(sch.depr_time, args.start_hour, args.end_hour):
@@ -273,15 +314,14 @@ def check_once(kobus: Kobus, args: argparse.Namespace) -> list[Schedule]:
     return available
 
 
-def cmd_watch(args: argparse.Namespace) -> None:
+def watch(kobus: Kobus, args: argparse.Namespace) -> None:
     interval = max(args.interval, MIN_INTERVAL)
-    kobus = Kobus()
-    kobus.start()
+    date_label = f"{args.date[4:6]}/{args.date[6:]}"
     # 시작 시점에 이미 자리 있는 배차도 알리고, 이후엔 '새로 생긴' 자리만 알린다
     known: dict[str, int] = {}
     fails = 0
     print(
-        f"감시 시작: {args.depart} -> {args.arrive}, {args.date} "
+        f"감시 시작: {DEPART_NAME} -> {ARRIVE_NAME}, {date_label} "
         f"{args.start_hour:02d}~{args.end_hour:02d}시, {interval}초 간격 (Ctrl+C 로 종료)"
     )
     while True:
@@ -292,7 +332,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
             fails += 1
             print(f"[{datetime.now().astimezone():%H:%M:%S}] 조회 실패({fails}): {e}", file=sys.stderr)
             if fails >= 5:
-                notify("고속버스 감시 오류", f"연속 {fails}회 조회 실패: {e}")
+                notify("속초 버스 감시 오류", f"연속 {fails}회 조회 실패: {e}")
                 fails = 0
             kobus = Kobus()  # 세션 새로 시작
             try:
@@ -313,8 +353,8 @@ def cmd_watch(args: argparse.Namespace) -> None:
                 for s in new
             ]
             notify(
-                f"고속버스 취소표! {args.date[4:6]}/{args.date[6:]}",
-                f"{args.depart}->{args.arrive}\n" + "\n".join(lines),
+                f"속초 버스 취소표! {date_label}",
+                f"{DEPART_NAME} -> {ARRIVE_NAME}\n" + "\n".join(lines),
             )
             if args.once_found:
                 return
@@ -323,27 +363,28 @@ def cmd_watch(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    p = argparse.ArgumentParser(description="고속버스(KOBUS) 취소표 감시")
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    t = sub.add_parser("terminals", help="노선/터미널 코드 검색")
-    t.add_argument("keyword", help="터미널 이름 일부 (예: 부산, 센트럴)")
-    t.set_defaults(func=cmd_terminals)
-
-    w = sub.add_parser("watch", help="잔여석 감시")
-    w.add_argument("--depart", required=True, help="출발 터미널 코드 (예: 010 서울경부)")
-    w.add_argument("--arrive", required=True, help="도착 터미널 코드 (예: 700 부산)")
-    w.add_argument("--date", required=True, help="출발일 YYYYMMDD")
-    w.add_argument("--from", dest="start_hour", type=int, default=0, help="이 시(時) 이후 출발 (기본 0)")
-    w.add_argument("--to", dest="end_hour", type=int, default=23, help="이 시(時) 까지 출발 (기본 23)")
-    w.add_argument("--class", dest="bus_class", nargs="*", help="등급 필터 (예: 우등 프리미엄)")
-    w.add_argument("--interval", type=int, default=60, help=f"조회 간격 초 (최소 {MIN_INTERVAL})")
-    w.add_argument("--once-found", action="store_true", help="한 번 알림 보내면 종료")
-    w.set_defaults(func=cmd_watch)
-
+    p = argparse.ArgumentParser(description="서울경부 -> 속초 고속버스 취소표 감시")
+    p.add_argument("--date", help="출발일 YYYYMMDD")
+    p.add_argument("--from", dest="start_hour", type=int, default=0, help="이 시(時) 이후 출발 (기본 0)")
+    p.add_argument("--to", dest="end_hour", type=int, default=23, help="이 시(時) 까지 출발 (기본 23)")
+    p.add_argument("--class", dest="bus_class", nargs="*", help="등급 필터 (예: 우등 프리미엄)")
+    p.add_argument("--interval", type=int, default=60, help=f"조회 간격 초 (최소 {MIN_INTERVAL})")
+    p.add_argument("--once-found", action="store_true", help="한 번 알림 보내면 종료")
+    p.add_argument("--arrive-code", help="속초 터미널 코드 (생략하면 자동 탐색)")
+    p.add_argument("--find-code", action="store_true", help="속초 터미널 코드만 확인하고 종료")
     args = p.parse_args(argv)
+    if not args.find_code and not args.date:
+        p.error("--date 가 필요하다 (예: --date 20261010)")
+
     try:
-        args.func(args)
+        kobus = Kobus()
+        kobus.start()
+        if args.find_code:
+            cmd_find_code(kobus)
+            return
+        if not args.arrive_code:
+            args.arrive_code = resolve_arrive_code(kobus)
+        watch(kobus, args)
     except KeyboardInterrupt:
         print("\n종료")
 

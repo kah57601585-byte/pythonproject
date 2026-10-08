@@ -1,6 +1,12 @@
 """kobus_watch.py 의 HTML 파싱 테스트 (네트워크 없이 가짜 HTML 로 확인)."""
 
-from kobus_watch import in_time_window, parse_form, parse_schedules, parse_seat_counts
+from kobus_watch import (
+    find_terminal_codes,
+    in_time_window,
+    parse_form,
+    parse_schedules,
+    parse_seat_counts,
+)
 
 SEARCH_HTML = """
 <form id="alcnSrchFrm" name="alcnSrchFrm" method="post">
@@ -51,3 +57,13 @@ def test_in_time_window():
     assert in_time_window("215900", 17, 21)
     assert not in_time_window("220000", 17, 21)
     assert not in_time_window("165900", 17, 21)
+
+
+def test_find_terminal_codes():
+    routes = [
+        {"deprTrmlNm": "서울경부", "deprTrmlCd": "010", "arvlTrmlNm": "속초", "arvlTrmlCd": "555"},
+        {"deprTrmlNm": "서울경부", "deprTrmlCd": "010", "arvlTrmlNm": "부산", "arvlTrmlCd": "700"},
+        {"arvlTrmlNm": "속초", "arvlTrmlNo": "555"},
+    ]
+    assert find_terminal_codes(routes, "속초") == {"555": "속초"}
+    assert find_terminal_codes(routes, "강릉") == {}
