@@ -22,6 +22,8 @@
   # 속초 코드 자동 탐색이 실패하면: 코드 확인 후 직접 지정
   python kobus_watch.py --find-code
   python kobus_watch.py --date 20261010 --arrive-code <속초코드>
+  # 알림이 잘 오는지 테스트
+  python kobus_watch.py --test-notify
 
 알림 설정(환경변수, 둘 중 하나 이상)
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID : 텔레그램 봇
@@ -372,7 +374,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--once-found", action="store_true", help="한 번 알림 보내면 종료")
     p.add_argument("--arrive-code", help="속초 터미널 코드 (생략하면 자동 탐색)")
     p.add_argument("--find-code", action="store_true", help="속초 터미널 코드만 확인하고 종료")
+    p.add_argument("--test-notify", action="store_true", help="테스트 알림 하나 보내고 종료")
     args = p.parse_args(argv)
+    if args.test_notify:
+        notify("속초 버스 취소표! 10/10 (테스트)", f"{DEPART_NAME} -> {ARRIVE_NAME}\n17:30 천일고속 우등 잔여 2/28")
+        return
     if not args.find_code and not args.date:
         p.error("--date 가 필요하다 (예: --date 20261010)")
 
