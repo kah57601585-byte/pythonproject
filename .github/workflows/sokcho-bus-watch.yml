@@ -1,0 +1,60 @@
+# 서울경부 -> 속초 고속버스 취소표 감시.
+# 폰에서 GitHub 웹 > Actions > "속초 버스 취소표 감시" > Run workflow 로 시작한다.
+# 알림은 저장소 Secret 의 NTFY_TOPIC (또는 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) 으로 간다.
+name: 속초 버스 취소표 감시
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "출발일 (YYYYMMDD, 예: 20261010)"
+        required: true
+      from_hour:
+        description: "이 시(時) 이후 출발"
+        default: "0"
+      to_hour:
+        description: "이 시(時) 까지 출발"
+        default: "23"
+      hours:
+        description: "감시 시간 (최대 5)"
+        default: "5"
+      test_notify:
+        description: "테스트 알림만 보내기"
+        type: boolean
+        default: false
+
+# 같은 감시가 겹쳐 돌지 않게 새로 시작하면 이전 실행은 취소
+concurrency:
+  group: sokcho-bus-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 테스트 알림
+        if: ${{ inputs.test_notify }}
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python kobus_watch.py --test-notify
+      - name: 감시
+        if: ${{ !inputs.test_notify }}
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DATE: ${{ inputs.date }}
+          FROM_HOUR: ${{ inputs.from_hour }}
+          TO_HOUR: ${{ inputs.to_hour }}
+          HOURS: ${{ inputs.hours }}
+        run: |
+          minutes=$(( (HOURS > 5 ? 5 : HOURS) * 60 ))
+          python kobus_watch.py --date "$DATE" --from "$FROM_HOUR" --to "$TO_HOUR" --max-minutes "$minutes"

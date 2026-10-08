@@ -326,7 +326,8 @@ def watch(kobus: Kobus, args: argparse.Namespace) -> None:
         f"감시 시작: {DEPART_NAME} -> {ARRIVE_NAME}, {date_label} "
         f"{args.start_hour:02d}~{args.end_hour:02d}시, {interval}초 간격 (Ctrl+C 로 종료)"
     )
-    while True:
+    deadline = time.monotonic() + args.max_minutes * 60 if args.max_minutes else None
+    while deadline is None or time.monotonic() < deadline:
         try:
             available = check_once(kobus, args)
             fails = 0
@@ -362,6 +363,7 @@ def watch(kobus: Kobus, args: argparse.Namespace) -> None:
                 return
         known = now
         time.sleep(interval + random.uniform(0, interval * 0.3))
+    print(f"{args.max_minutes}분이 지나서 감시를 끝낸다.")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -372,6 +374,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--class", dest="bus_class", nargs="*", help="등급 필터 (예: 우등 프리미엄)")
     p.add_argument("--interval", type=int, default=60, help=f"조회 간격 초 (최소 {MIN_INTERVAL})")
     p.add_argument("--once-found", action="store_true", help="한 번 알림 보내면 종료")
+    p.add_argument("--max-minutes", type=int, help="이 시간(분)이 지나면 종료 (기본: 무제한)")
     p.add_argument("--arrive-code", help="속초 터미널 코드 (생략하면 자동 탐색)")
     p.add_argument("--find-code", action="store_true", help="속초 터미널 코드만 확인하고 종료")
     p.add_argument("--test-notify", action="store_true", help="테스트 알림 하나 보내고 종료")
