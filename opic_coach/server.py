@@ -73,7 +73,7 @@ def meta():
 def question(req: QuestionRequest):
     q = pick_question(req.level, req.topics, req.exclude_ids)
     if req.use_ai:
-        # Keep the bank's topic/type mix, but let Claude write a fresh question.
+        # Keep the bank's topic/type mix, but let the AI write a fresh question.
         try:
             text = coach.generate_question(req.level, q.topic, q.qtype)
         except coach.CoachError as e:

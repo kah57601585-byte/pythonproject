@@ -1,17 +1,18 @@
-"""Claude-powered OPIc coach: generates questions and gives feedback on answers."""
+"""OpenAI-powered OPIc coach: generates questions and gives feedback on answers."""
 
 from __future__ import annotations
 
 import os
 from typing import Literal
 
-import anthropic
+import openai
 from pydantic import BaseModel, Field
 
 from questions import LEVEL_INFO, QUESTION_TYPES, TOPICS, clamp_level
 
-MODEL = os.environ.get("OPIC_MODEL", "claude-opus-5-5")
-# Feedback quality vs. speed. "low" answers fastest; raise to "medium"/"high" for deeper feedback.
+MODEL = os.environ.get("OPIC_MODEL", "gpt-5.4-mini")
+# Reasoning effort for reasoning models: "low" answers fastest; "medium"/"high" give deeper feedback.
+# Leave empty for models that don't support it (it is retried without it automatically anyway).
 EFFORT = os.environ.get("OPIC_EFFORT", "low")
 
 Grade = Literal["NL", "NM", "NH", "IL", "IM1", "IM2", "IM3", "IH", "AL"]
@@ -73,43 +74,60 @@ class CoachError(RuntimeError):
     pass
 
 
-_client: anthropic.Anthropic | None = None
+_client: openai.OpenAI | None = None
 
 
-def get_client() -> anthropic.Anthropic:
+def get_client() -> openai.OpenAI:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic()
+        _client = openai.OpenAI()  # reads OPENAI_API_KEY
     return _client
+
+
+def _call(system: str, user: str, output_format: type[BaseModel], max_tokens: int, effort: str | None):
+    kwargs = {}
+    if effort:
+        kwargs["reasoning_effort"] = effort
+    return get_client().chat.completions.parse(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        response_format=output_format,
+        max_completion_tokens=max_tokens,
+        **kwargs,
+    )
 
 
 def _parse(system: str, user: str, output_format: type[BaseModel], max_tokens: int):
     try:
-        response = get_client().beta.messages.parse(
-            model=MODEL,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            output_config={"effort": EFFORT},
-            output_format=output_format,
-            # Re-run on another model if the request is declined by a safety classifier.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
-    except anthropic.AuthenticationError as e:
-        raise CoachError("API 키가 올바르지 않아요. .env 파일의 ANTHROPIC_API_KEY를 확인해 주세요.") from e
-    except anthropic.RateLimitError as e:
-        raise CoachError("요청이 너무 많아요. 잠시 후 다시 시도해 주세요.") from e
-    except anthropic.APIConnectionError as e:
+        try:
+            completion = _call(system, user, output_format, max_tokens, EFFORT)
+        except openai.BadRequestError as e:
+            # Non-reasoning models reject reasoning_effort; retry without it.
+            if not EFFORT or "reasoning" not in str(e).lower():
+                raise
+            completion = _call(system, user, output_format, max_tokens, None)
+    except openai.AuthenticationError as e:
+        raise CoachError("API 키가 올바르지 않아요. .env 파일의 OPENAI_API_KEY를 확인해 주세요.") from e
+    except openai.NotFoundError as e:
+        raise CoachError(f"모델 '{MODEL}'을 찾을 수 없어요. .env 의 OPIC_MODEL 을 확인해 주세요.") from e
+    except openai.RateLimitError as e:
+        raise CoachError("요청이 너무 많거나 크레딧이 부족해요. 잠시 후 다시 시도하거나 결제 상태를 확인해 주세요.") from e
+    except openai.APIConnectionError as e:
         raise CoachError("AI 서버에 연결할 수 없어요. PC의 인터넷 연결을 확인해 주세요.") from e
-    except anthropic.APIStatusError as e:
+    except openai.LengthFinishReasonError as e:
+        raise CoachError("AI 응답이 잘렸어요. 다시 시도해 주세요.") from e
+    except openai.APIStatusError as e:
         raise CoachError(f"AI 서버 오류 ({e.status_code}): {e.message}") from e
 
-    if response.stop_reason == "refusal":
+    message = completion.choices[0].message
+    if message.refusal:
         raise CoachError("AI가 이 요청에 답하지 않았어요. 다른 답변으로 다시 시도해 주세요.")
-    if response.stop_reason == "max_tokens" or response.parsed_output is None:
-        raise CoachError("AI 응답이 잘렸어요. 다시 시도해 주세요.")
-    return response.parsed_output
+    if message.parsed is None:
+        raise CoachError("AI 응답을 읽을 수 없어요. 다시 시도해 주세요.")
+    return message.parsed
 
 
 def get_feedback(question: str, answer: str, level: int, qtype: str | None = None,
