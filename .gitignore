@@ -11,3 +11,7 @@
 
 # OS
 **/.DS_Store
+
+# secrets
+**/.env
+opic_coach/.venv/

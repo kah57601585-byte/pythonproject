@@ -1,0 +1,16 @@
+{
+  "name": "OPIc Coach",
+  "short_name": "OPIc",
+  "description": "난이도별 OPIc 질문과 AI 피드백으로 영어 말하기 연습",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f6fa",
+  "theme_color": "#4f46e5",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

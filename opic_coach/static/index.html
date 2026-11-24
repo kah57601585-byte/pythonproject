@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#4f46e5">
+  <title>OPIc Coach</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>OPIc Coach</h1>
+    <span id="levelBadge" class="badge"></span>
+  </header>
+
+  <main>
+    <!-- 연습 -->
+    <section id="view-practice" class="view active">
+      <div class="card" id="questionCard">
+        <div class="q-meta">
+          <span id="qType" class="chip">질문 유형</span>
+          <span id="qTopic" class="chip chip-soft">주제</span>
+        </div>
+        <p id="qText" class="q-text hidden"></p>
+        <p id="qPlaceholder" class="muted">아래 <b>새 질문</b>을 눌러 시작하세요. 실제 시험처럼 질문은 소리로만 들려줘요.</p>
+        <div class="row">
+          <button id="btnNewQ" class="btn primary">새 질문</button>
+          <button id="btnReplay" class="btn" disabled>🔊 다시 듣기</button>
+          <button id="btnShowQ" class="btn" disabled>질문 보기</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="rec-head">
+          <span id="recStatus" class="muted">녹음 대기</span>
+          <span id="timer" class="timer">0:00</span>
+        </div>
+        <button id="btnRec" class="btn rec" disabled>🎤 답변 시작</button>
+        <label class="muted small" for="answer">인식된 답변 (직접 고칠 수도 있어요)</label>
+        <textarea id="answer" rows="7" placeholder="말하면 여기에 글자로 나타나요"></textarea>
+        <div class="row">
+          <span id="wordCount" class="muted small">0 단어</span>
+          <span class="spacer"></span>
+          <button id="btnClear" class="btn ghost">지우기</button>
+          <button id="btnFeedback" class="btn primary" disabled>피드백 받기</button>
+        </div>
+      </div>
+
+      <div id="feedback"></div>
+    </section>
+
+    <!-- 설정 -->
+    <section id="view-setup" class="view">
+      <div class="card">
+        <h2>난이도 (Self-Assessment)</h2>
+        <div id="levelList" class="level-list"></div>
+      </div>
+      <div class="card">
+        <h2>Background Survey 주제</h2>
+        <p class="muted small">선택한 주제와 돌발 주제에서 질문이 나와요.</p>
+        <div id="topicList" class="topic-list"></div>
+      </div>
+      <div class="card">
+        <h2>옵션</h2>
+        <label class="toggle"><input type="checkbox" id="optAi"> AI가 새 질문 만들기 (느리고 비용이 조금 들어요)</label>
+        <label class="toggle"><input type="checkbox" id="optAutoRec"> 질문이 끝나면 자동으로 녹음 시작</label>
+        <label class="toggle">말하기 속도
+          <select id="optRate">
+            <option value="0.85">느리게</option>
+            <option value="1" selected>보통</option>
+            <option value="1.1">빠르게</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <!-- 기록 -->
+    <section id="view-history" class="view">
+      <div class="card">
+        <div class="row"><h2>연습 기록</h2><span class="spacer"></span><button id="btnClearHistory" class="btn ghost">전체 삭제</button></div>
+        <div id="historyList"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-view="practice" class="tab active">🎙️<span>연습</span></button>
+    <button data-view="history" class="tab">📒<span>기록</span></button>
+    <button data-view="setup" class="tab">⚙️<span>설정</span></button>
+  </nav>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>
