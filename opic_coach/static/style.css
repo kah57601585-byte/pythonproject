@@ -147,3 +147,30 @@ audio { width: 100%; margin-top: 8px; }
 .pair .ko { color: var(--muted); font-size: 14px; }
 .pair .en { font-weight: 600; }
 .mode-chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--soft); }
+
+/* Survey */
+.survey-sec { margin: 14px 0 6px; }
+.survey-sec h3 { font-size: 14px; margin: 0 0 8px; }
+.opt-list { display: grid; gap: 6px; }
+.opt-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt {
+  display: flex; gap: 8px; align-items: center; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-size: 14px;
+}
+.opt-grid .opt { border-radius: 999px; padding: 6px 12px; }
+.opt.on { border-color: var(--primary); background: var(--soft); }
+.opt input { margin: 0; }
+.opt-grid .opt input { display: none; }
+.survey-count {
+  position: sticky; bottom: calc(64px + env(safe-area-inset-bottom)); margin-top: 12px;
+  padding: 8px 12px; border-radius: 10px; background: var(--soft); font-size: 14px; text-align: center;
+}
+.survey-count.warn { background: #fff4e5; color: #8a4b00; }
+@media (prefers-color-scheme: dark) { .survey-count.warn { background: #3a2a12; color: #ffcc80; } }
+.banner {
+  border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font-size: 14px;
+  background: #fdecec; color: #8b1a1a; border: 1px solid #f5c2c2;
+}
+@media (prefers-color-scheme: dark) { .banner { background: #3a1717; color: #ffb4b4; border-color: #5c2626; } }
+.ok-text { color: var(--good); }
+.bad-text { color: var(--bad); }

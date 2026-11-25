@@ -15,7 +15,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 
 const settings = Object.assign(
   { level: 3, topics: ["home", "music", "movies", "cafe", "travel"], useAi: false, autoRec: true, rate: 1,
-    micId: "", micLabel: "" },
+    micId: "", micLabel: "", survey: null },
   store.get("settings", {}),
 );
 let meta = null;
@@ -286,16 +286,7 @@ function renderSetup() {
       settings.level = +el.dataset.level; saveSettings(); renderSetup();
     }));
 
-  $("topicList").innerHTML = Object.entries(meta.topics)
-    .filter(([k]) => k !== "general")
-    .map(([k, label]) => `
-      <label class="topic-item"><input type="checkbox" value="${k}" ${settings.topics.includes(k) ? "checked" : ""}> ${esc(label)}</label>`)
-    .join("");
-  $("topicList").querySelectorAll("input").forEach((cb) =>
-    cb.addEventListener("change", () => {
-      settings.topics = [...$("topicList").querySelectorAll("input:checked")].map((c) => c.value);
-      saveSettings();
-    }));
+  renderSurvey();
 
   $("optAi").checked = settings.useAi;
   $("optAutoRec").checked = settings.autoRec;
@@ -304,6 +295,112 @@ function renderSetup() {
 $("optAi").addEventListener("change", (e) => { settings.useAi = e.target.checked; saveSettings(); });
 $("optAutoRec").addEventListener("change", (e) => { settings.autoRec = e.target.checked; saveSettings(); });
 $("optRate").addEventListener("change", (e) => { settings.rate = +e.target.value; saveSettings(); });
+
+// ---------- Background Survey ----------
+function defaultSurvey() {
+  // single sections store the chosen option index; multi sections share one list of topic ids.
+  const singles = { job: 0, student: 1, housing: 2 };
+  const known = new Set(meta.survey.filter((s) => s.kind === "multi").flatMap((s) => s.options.map((o) => o.topic)));
+  return { ...singles, picks: settings.topics.filter((t) => known.has(t)) };
+}
+
+function surveyTopics() {
+  const sv = settings.survey;
+  const topics = new Set();
+  for (const sec of meta.survey) {
+    if (sec.kind === "single") {
+      const opt = sec.options[sv[sec.id]];
+      if (opt?.topic) topics.add(opt.topic);
+    }
+  }
+  sv.picks.forEach((t) => topics.add(t));
+  return [...topics];
+}
+
+function renderSurvey() {
+  if (!settings.survey) { settings.survey = defaultSurvey(); }
+  const sv = settings.survey;
+  $("surveyBox").innerHTML = meta.survey.map((sec) => {
+    if (sec.kind === "single") {
+      return `<div class="survey-sec"><h3>${esc(sec.title)}</h3><div class="opt-list">${sec.options.map((o, i) => `
+        <label class="opt ${sv[sec.id] === i ? "on" : ""}">
+          <input type="radio" name="sv-${sec.id}" data-sec="${sec.id}" value="${i}" ${sv[sec.id] === i ? "checked" : ""}>
+          ${esc(o.label)}</label>`).join("")}</div></div>`;
+    }
+    return `<div class="survey-sec"><h3>${esc(sec.title)} <span class="muted small">(복수 선택)</span></h3>
+      <div class="opt-grid">${sec.options.map((o) => {
+        const key = o.topic || `none-${sec.id}`;
+        const on = sv.picks.includes(key);
+        return `<label class="opt ${on ? "on" : ""}"><input type="checkbox" value="${esc(key)}" ${on ? "checked" : ""}>${esc(o.label)}</label>`;
+      }).join("")}</div></div>`;
+  }).join("");
+
+  $("surveyBox").querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
+    if (inp.type === "radio") {
+      sv[inp.dataset.sec] = +inp.value;
+    } else {
+      sv.picks = sv.picks.filter((t) => t !== inp.value);
+      if (inp.checked) sv.picks.push(inp.value);
+      // "운동을 전혀 하지 않음" excludes the sports in the same section, and vice versa.
+      const sec = inp.closest(".survey-sec");
+      if (inp.value.startsWith("none-") && inp.checked) {
+        sec.querySelectorAll("input").forEach((o) => { if (o !== inp) sv.picks = sv.picks.filter((t) => t !== o.value); });
+      } else if (inp.checked) {
+        sec.querySelectorAll("input").forEach((o) => {
+          if (o.value.startsWith("none-")) sv.picks = sv.picks.filter((t) => t !== o.value);
+        });
+      }
+    }
+    saveSurvey();
+    renderSurvey();
+  }));
+  renderSurveyCount();
+}
+
+function renderSurveyCount() {
+  const n = settings.survey.picks.filter((t) => !t.startsWith("none-")).length;
+  const min = meta.survey_min_activities;
+  const el = $("surveyCount");
+  el.classList.toggle("warn", n < min);
+  el.textContent = n < min
+    ? `4~7번에서 ${n}개 선택 · 실제 시험은 ${min}개 이상 골라야 해요 (${min - n}개 더)`
+    : `4~7번에서 ${n}개 선택 ✓ (실제 시험 기준 ${min}개 이상)`;
+}
+
+function saveSurvey() {
+  settings.topics = surveyTopics().filter((t) => !t.startsWith("none-"));
+  saveSettings();
+}
+
+// ---------- AI connection ----------
+async function checkAi(deep) {
+  try {
+    return await api(`/api/health${deep ? "?deep=true" : ""}`);
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+}
+
+function showAiBanner(res) {
+  const b = $("aiBanner");
+  if (res.ok) { b.classList.add("hidden"); return; }
+  b.innerHTML = `⚠️ <b>AI를 사용할 수 없어요</b><br>${esc(res.message)}<br>
+    <span class="small">설정 → 🤖 AI 연결 확인으로 다시 확인할 수 있어요.</span>`;
+  b.classList.remove("hidden");
+}
+
+$("btnAiCheck").addEventListener("click", async () => {
+  const btn = $("btnAiCheck");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 확인 중...';
+  const res = await checkAi(true);
+  $("aiStatus").innerHTML = res.ok
+    ? `<span class="ok-text">✅ ${esc(res.message)}</span>`
+    : `<span class="bad-text">❌ ${esc(res.message)}</span>`;
+  showAiBanner(res);
+  btn.disabled = false;
+  btn.textContent = "AI 연결 확인";
+});
 
 // ---------- text-to-speech ----------
 function pickVoice() {
@@ -616,7 +713,9 @@ $("btnClearHistory").addEventListener("click", () => {
   try {
     meta = await api("/api/meta");
     renderSetup();
+    saveSurvey();
     renderBadge();
+    showAiBanner(await checkAi(false));
   } catch {
     toast("서버에 연결할 수 없어요. PC에서 서버가 켜져 있는지 확인하세요.", 6000);
   }

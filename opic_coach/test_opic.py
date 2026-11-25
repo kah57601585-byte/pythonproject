@@ -43,8 +43,58 @@ def test_exclude_ids_avoids_repeats_until_pool_exhausted():
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0000000000000000")
     return TestClient(server.app)
+
+
+def test_missing_api_key_gives_clear_error(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    res = TestClient(server.app).post(
+        "/api/answer", files={"audio": ("a.webm", b"\x1a" * 5000, "audio/webm")}, data={"question": "Q?"})
+    assert res.status_code == 503
+    assert "OPENAI_API_KEY" in res.json()["detail"]
+    health = TestClient(server.app).get("/api/health").json()
+    assert health["ok"] is False and health["step"] == "key"
+
+
+def test_placeholder_key_is_rejected(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-여기에-키를-넣으세요")
+    assert "올바르지" in server.api_key_problem()
+
+
+def test_dotenv_handles_notepad_quirks(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-old-system-value")
+    env = tmp_path / ".env"
+    env.write_bytes("OPENAI_API_KEY = \"sk-from-file-1234\"\r\n# comment\r\n".encode("utf-16"))
+    server.load_dotenv(env)
+    assert server.os.environ["OPENAI_API_KEY"] == "sk-from-file-1234"
+
+
+def test_health_reports_openai_errors(client, monkeypatch):
+    def boom():
+        raise coach.CoachError("OpenAI 크레딧이 없어요.")
+    monkeypatch.setattr(coach, "ping", boom)
+    res = client.get("/api/health?deep=true").json()
+    assert client.get("/api/health").json()["ok"] is True
+    assert res == {"ok": False, "step": "openai", "message": "OpenAI 크레딧이 없어요."}
+
+
+def test_survey_topics_all_have_questions_at_every_level():
+    from questions import SURVEY
+    for sec in SURVEY:
+        for topic, _label, _ in sec["options"]:
+            if topic is None:
+                continue
+            for level in range(3, 7):
+                assert any(q.topic == topic for q in candidates(level, [topic])), (topic, level)
+
+
+def test_pick_covers_many_selected_topics():
+    rng = random.Random(7)
+    chosen = ["swimming", "pets", "golf", "museum", "cooking", "overseas_travel"]
+    seen = {pick_question(4, chosen, rng=rng).topic for _ in range(300)}
+    assert set(chosen) <= seen
 
 
 def test_meta_and_static(client):

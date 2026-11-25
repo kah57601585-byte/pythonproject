@@ -19,6 +19,7 @@
   <main>
     <!-- 연습 -->
     <section id="view-practice" class="view active">
+      <div id="aiBanner" class="banner hidden"></div>
       <div class="card" id="questionCard">
         <div class="q-meta">
           <span id="qType" class="chip">질문 유형</span>
@@ -55,6 +56,11 @@
     <!-- 설정 -->
     <section id="view-setup" class="view">
       <div class="card">
+        <h2>🤖 AI 연결</h2>
+        <p id="aiStatus" class="muted small">API 키·모델·크레딧이 정상인지 확인해요. (아주 작은 요청 1번, 1원 미만)</p>
+        <button id="btnAiCheck" class="btn primary">AI 연결 확인</button>
+      </div>
+      <div class="card">
         <h2>🎙️ 마이크</h2>
         <label class="muted small" for="micSelect">사용할 마이크</label>
         <div class="row" style="margin-top:4px">
@@ -77,9 +83,10 @@
         <div id="levelList" class="level-list"></div>
       </div>
       <div class="card">
-        <h2>Background Survey 주제</h2>
-        <p class="muted small">선택한 주제와 돌발 주제에서 질문이 나와요.</p>
-        <div id="topicList" class="topic-list"></div>
+        <h2>Background Survey</h2>
+        <p class="muted small">실제 OPIc처럼 고른 항목과 돌발 주제에서 질문이 나와요.</p>
+        <div id="surveyBox"></div>
+        <div id="surveyCount" class="survey-count"></div>
       </div>
       <div class="card">
         <h2>옵션</h2>

@@ -20,26 +20,81 @@ from pydantic import BaseModel, Field
 BASE_DIR = Path(__file__).resolve().parent
 
 
-def load_dotenv(path: Path) -> None:
-    """Minimal .env loader (KEY=VALUE lines) so no extra dependency is needed."""
+def _read_text(path: Path) -> str:
+    raw = path.read_bytes()
+    for enc in ("utf-8-sig", "utf-16", "cp949"):
+        try:
+            return raw.decode(enc)
+        except UnicodeError:
+            continue
+    return raw.decode("utf-8", errors="ignore")
+
+
+def load_dotenv(path: Path) -> dict[str, str]:
+    """Minimal .env loader (KEY=VALUE lines). Values in the file win over old system variables."""
+    loaded: dict[str, str] = {}
     if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        return loaded
+    for line in _read_text(path).splitlines():
         line = line.strip()
+        if line.lower().startswith("export "):
+            line = line[7:].strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        key, value = key.strip(), value.strip().strip('"').strip("'").strip()
+        if value:
+            os.environ[key] = value
+            loaded[key] = value
+    return loaded
 
 
-load_dotenv(BASE_DIR / ".env")
+def find_env_file() -> Path | None:
+    # Windows Notepad often saves ".env" as ".env.txt" with the extension hidden.
+    for name in (".env", ".env.txt", "env.txt", "env"):
+        if (BASE_DIR / name).exists():
+            return BASE_DIR / name
+    return None
+
+
+ENV_FILE = find_env_file()
+if ENV_FILE:
+    load_dotenv(ENV_FILE)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("opic_coach")
+
+
+def api_key_problem() -> str | None:
+    """Return a Korean explanation if the OpenAI key is obviously missing or malformed."""
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not key:
+        where = f"{ENV_FILE.name} 파일" if ENV_FILE else ".env 파일(없음)"
+        return f"OPENAI_API_KEY가 없어요. opic_coach 폴더의 {where}에 OPENAI_API_KEY=sk-... 를 넣고 서버를 다시 켜 주세요."
+    if "여기에" in key or not key.startswith("sk-"):
+        return "OPENAI_API_KEY 값이 올바르지 않아요. sk- 로 시작하는 실제 키를 붙여넣었는지 확인해 주세요."
+    return None
+
+
+def mask(key: str) -> str:
+    return f"{key[:7]}...{key[-4:]}" if len(key) > 12 else "(짧음)"
+
+
+log.info("환경 파일: %s", ENV_FILE or "없음 (opic_coach 폴더에 .env 를 만들어 주세요)")
+if ENV_FILE and ENV_FILE.name != ".env":
+    log.warning("'%s' 파일을 읽었어요. 이름을 '.env' 로 바꾸는 것을 권장해요.", ENV_FILE.name)
+_problem = api_key_problem()
+if _problem:
+    log.warning("!!! %s", _problem)
+else:
+    log.info("OpenAI 키 확인: %s", mask(os.environ["OPENAI_API_KEY"]))
 
 import coach
 from questions import (
     LEVEL_INFO,
     LEVEL_TYPES,
     QUESTION_TYPES,
+    SURVEY,
+    SURVEY_MIN_ACTIVITIES,
     TOPICS,
     Question,
     pick_question,
@@ -68,15 +123,36 @@ def meta():
     return {
         "levels": {str(k): v | {"types": LEVEL_TYPES[k]} for k, v in LEVEL_INFO.items()},
         "topics": TOPICS,
+        "survey": [
+            {"id": sec["id"], "title": sec["title"], "kind": sec["kind"],
+             "options": [{"topic": t, "label": label} for t, label, _ in sec["options"]]}
+            for sec in SURVEY
+        ],
+        "survey_min_activities": SURVEY_MIN_ACTIVITIES,
         "question_types": QUESTION_TYPES,
         "model": coach.MODEL,
     }
 
 
+@app.get("/api/health")
+def health(deep: bool = False):
+    """Check the API key. With deep=true, also check model access and credits with one tiny request."""
+    problem = api_key_problem()
+    if problem:
+        return {"ok": False, "step": "key", "message": problem}
+    if not deep:
+        return {"ok": True, "message": f"API 키 있음 ({mask(os.environ['OPENAI_API_KEY'])})"}
+    try:
+        coach.ping()
+    except coach.CoachError as e:
+        return {"ok": False, "step": "openai", "message": str(e)}
+    return {"ok": True, "message": f"AI 연결 정상 (모델: {coach.MODEL}, 키: {mask(os.environ['OPENAI_API_KEY'])})"}
+
+
 @app.post("/api/question")
 def question(req: QuestionRequest):
     q = pick_question(req.level, req.topics, req.exclude_ids)
-    if req.use_ai:
+    if req.use_ai and not api_key_problem():
         # Keep the bank's topic/type mix, but let the AI write a fresh question.
         try:
             text = coach.generate_question(req.level, q.topic, q.qtype)
@@ -88,6 +164,8 @@ def question(req: QuestionRequest):
 
 @app.post("/api/feedback")
 def feedback(req: FeedbackRequest):
+    if problem := api_key_problem():
+        raise HTTPException(status_code=503, detail=problem)
     if len(req.answer.split()) < 3:
         raise HTTPException(status_code=400, detail="답변이 너무 짧아요. 조금 더 길게 말해 주세요.")
     try:
@@ -114,6 +192,8 @@ async def answer(
     mode="english": grade the English answer.
     mode="korean": the learner answered in Korean; show how to say it in English.
     """
+    if problem := api_key_problem():
+        raise HTTPException(status_code=503, detail=problem)
     data = await audio.read()
     if len(data) < 1000:
         raise HTTPException(status_code=400, detail="녹음된 소리가 없어요. 마이크를 확인해 주세요.")
@@ -158,4 +238,11 @@ def service_worker():
     return FileResponse(BASE_DIR / "static" / "sw.js", media_type="application/javascript")
 
 
-app.mount("/", StaticFiles(directory=BASE_DIR / "static", html=True), name="static")
+class NoCacheStatic(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", NoCacheStatic(directory=BASE_DIR / "static", html=True), name="static")

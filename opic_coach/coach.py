@@ -221,6 +221,31 @@ def transcribe(audio: bytes, filename: str, content_type: str, language: str = "
     raise CoachError("음성 인식 모델을 찾을 수 없어요.")
 
 
+def ping() -> None:
+    """Smallest possible real request: verifies key, model access and credits."""
+    try:
+        get_client().chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": "Reply with OK."}],
+            max_completion_tokens=200,
+        )
+    except openai.AuthenticationError as e:
+        log.warning("OpenAI 401: %s", e.message)
+        raise CoachError("API 키가 올바르지 않아요. 키를 다시 복사해서 .env 에 넣고 서버를 다시 켜 주세요.") from e
+    except openai.PermissionDeniedError as e:
+        log.warning("OpenAI 403: %s", e.message)
+        raise CoachError(f"이 키로는 모델 '{MODEL}'을 쓸 수 없어요: {e.message}") from e
+    except openai.NotFoundError as e:
+        raise CoachError(f"모델 '{MODEL}'을 찾을 수 없어요. .env 의 OPIC_MODEL 을 최신 모델로 바꿔 주세요.") from e
+    except openai.RateLimitError as e:
+        raise _rate_limit_error(e) from e
+    except openai.APIConnectionError as e:
+        raise CoachError("OpenAI 서버에 연결할 수 없어요. PC의 인터넷 연결을 확인해 주세요.") from e
+    except openai.APIStatusError as e:
+        log.warning("OpenAI error %s: %s", e.status_code, e.message)
+        raise CoachError(f"AI 서버 오류 ({e.status_code}): {e.message}") from e
+
+
 def get_feedback(question: str, answer: str, level: int, qtype: str | None = None,
                  duration_sec: float | None = None) -> Feedback:
     level = clamp_level(level)
