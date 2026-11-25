@@ -38,15 +38,13 @@
           <span id="recStatus" class="muted">녹음 대기</span>
           <span id="timer" class="timer">0:00</span>
         </div>
-        <button id="btnRec" class="btn rec" disabled>🎤 답변 시작</button>
-        <label class="muted small" for="answer">인식된 답변 (직접 고칠 수도 있어요)</label>
-        <textarea id="answer" rows="7" placeholder="말하면 여기에 글자로 나타나요"></textarea>
-        <div class="row">
-          <span id="wordCount" class="muted small">0 단어</span>
-          <span class="spacer"></span>
-          <button id="btnClear" class="btn ghost">지우기</button>
-          <button id="btnFeedback" class="btn primary" disabled>피드백 받기</button>
+        <div class="meter-wrap">
+          <div class="meter"><div id="recMeter" class="meter-fill"></div></div>
+          <span id="recVoice" class="voice-ind">⚪ 대기</span>
         </div>
+        <div id="recMicName" class="muted small">🎙️ 마이크: 기본 마이크</div>
+        <button id="btnRec" class="btn rec" disabled>🎤 답변 시작</button>
+        <p class="muted small center">답변을 마치고 <b>답변 끝내기</b>를 누르면 바로 제출돼요.</p>
       </div>
 
       <div id="feedback"></div>
@@ -54,6 +52,24 @@
 
     <!-- 설정 -->
     <section id="view-setup" class="view">
+      <div class="card">
+        <h2>🎙️ 마이크</h2>
+        <label class="muted small" for="micSelect">사용할 마이크</label>
+        <div class="row" style="margin-top:4px">
+          <select id="micSelect" class="grow"><option value="">기본 마이크</option></select>
+          <button id="btnMicRefresh" class="btn">새로고침</button>
+        </div>
+        <div class="meter-wrap" style="margin-top:12px">
+          <div class="meter"><div id="testMeter" class="meter-fill"></div></div>
+          <span id="testVoice" class="voice-ind">⚪ 꺼짐</span>
+        </div>
+        <div class="row">
+          <button id="btnMicTest" class="btn primary">마이크 테스트</button>
+          <button id="btnMicRecord" class="btn">3초 녹음 후 들어보기</button>
+        </div>
+        <p id="micStatus" class="muted small">테스트를 누르고 말해 보세요. 막대가 움직이고 초록불이 켜지면 정상이에요.</p>
+        <audio id="micPlayback" controls class="hidden"></audio>
+      </div>
       <div class="card">
         <h2>난이도 (Self-Assessment)</h2>
         <div id="levelList" class="level-list"></div>

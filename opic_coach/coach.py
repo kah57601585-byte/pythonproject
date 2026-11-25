@@ -130,6 +130,43 @@ def _parse(system: str, user: str, output_format: type[BaseModel], max_tokens: i
     return message.parsed
 
 
+STT_MODEL = os.environ.get("OPIC_STT_MODEL", "gpt-4o-mini-transcribe")
+STT_FALLBACK_MODEL = "whisper-1"
+# Ask for a verbatim transcript: grading needs the learner's real mistakes and fillers.
+STT_PROMPT = (
+    "Transcribe exactly what the speaker says, word for word, including grammar mistakes, "
+    "repetitions and filler words like um, uh, you know. Do not correct the English."
+)
+
+
+def transcribe(audio: bytes, filename: str, content_type: str) -> str:
+    """Speech-to-text for a recorded answer. Falls back to whisper-1 if the configured model is unavailable."""
+    models = [STT_MODEL] + ([STT_FALLBACK_MODEL] if STT_MODEL != STT_FALLBACK_MODEL else [])
+    for i, model in enumerate(models):
+        try:
+            result = get_client().audio.transcriptions.create(
+                model=model,
+                file=(filename, audio, content_type),
+                language="en",
+                prompt=STT_PROMPT,
+            )
+            return (result.text or "").strip()
+        except (openai.NotFoundError, openai.BadRequestError) as e:
+            model_problem = isinstance(e, openai.NotFoundError) or "model" in str(e).lower()
+            if model_problem and i + 1 < len(models):
+                continue
+            raise CoachError(f"음성 인식에 실패했어요: {getattr(e, 'message', e)}") from e
+        except openai.AuthenticationError as e:
+            raise CoachError("API 키가 올바르지 않아요. .env 파일의 OPENAI_API_KEY를 확인해 주세요.") from e
+        except openai.RateLimitError as e:
+            raise CoachError("요청이 너무 많거나 크레딧이 부족해요. 잠시 후 다시 시도하거나 결제 상태를 확인해 주세요.") from e
+        except openai.APIConnectionError as e:
+            raise CoachError("AI 서버에 연결할 수 없어요. PC의 인터넷 연결을 확인해 주세요.") from e
+        except openai.APIStatusError as e:
+            raise CoachError(f"음성 인식 서버 오류 ({e.status_code}): {e.message}") from e
+    raise CoachError("음성 인식 모델을 찾을 수 없어요.")
+
+
 def get_feedback(question: str, answer: str, level: int, qtype: str | None = None,
                  duration_sec: float | None = None) -> Feedback:
     level = clamp_level(level)

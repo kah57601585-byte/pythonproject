@@ -97,3 +97,51 @@ def test_feedback_reports_coach_errors(client, monkeypatch):
     res = client.post("/api/feedback", json={"question": "Q?", "answer": "I like music a lot.", "level": 3})
     assert res.status_code == 502
     assert "API 키" in res.json()["detail"]
+
+
+def _fake_feedback():
+    return coach.Feedback(
+        estimated_grade="IH", overall_comment_ko="좋아요", strengths_ko=[], corrections=[],
+        better_expressions=[], structure_feedback_ko="-", length_feedback_ko="-",
+        model_answer="Well, ...", next_tip_ko="-",
+    )
+
+
+def test_answer_endpoint_transcribes_then_grades(client, monkeypatch):
+    seen = {}
+
+    def fake_transcribe(audio, filename, content_type):
+        seen.update(size=len(audio), filename=filename, content_type=content_type)
+        return "I usually go to the park on weekends with my dog."
+
+    def fake_feedback(question, answer, level, qtype, duration):
+        seen.update(answer=answer, level=level, duration=duration)
+        return _fake_feedback()
+
+    monkeypatch.setattr(coach, "transcribe", fake_transcribe)
+    monkeypatch.setattr(coach, "get_feedback", fake_feedback)
+    res = client.post(
+        "/api/answer",
+        files={"audio": ("answer.webm", b"\x1a" * 5000, "audio/webm;codecs=opus")},
+        data={"question": "Tell me about a park.", "level": "5", "qtype": "routine", "duration_sec": "61"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["transcript"].startswith("I usually go")
+    assert body["feedback"]["estimated_grade"] == "IH"
+    assert seen["filename"] == "answer.webm" and seen["content_type"] == "audio/webm"
+    assert seen["answer"] == body["transcript"] and seen["level"] == 5 and seen["duration"] == 61
+
+
+def test_answer_rejects_empty_audio(client):
+    res = client.post("/api/answer", files={"audio": ("a.webm", b"x", "audio/webm")}, data={"question": "Q?"})
+    assert res.status_code == 400
+
+
+def test_answer_rejects_when_nothing_recognized(client, monkeypatch):
+    monkeypatch.setattr(coach, "transcribe", lambda *a: "um")
+    called = []
+    monkeypatch.setattr(coach, "get_feedback", lambda *a: called.append(1))
+    res = client.post("/api/answer", files={"audio": ("a.webm", b"\x1a" * 5000, "audio/webm")}, data={"question": "Q?"})
+    assert res.status_code == 422
+    assert not called

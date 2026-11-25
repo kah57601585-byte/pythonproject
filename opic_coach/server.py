@@ -8,8 +8,10 @@ from __future__ import annotations
 import os
 import random
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -91,6 +93,41 @@ def feedback(req: FeedbackRequest):
     except coach.CoachError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return fb.model_dump()
+
+
+MAX_AUDIO_BYTES = 20 * 1024 * 1024  # OpenAI's upload limit is 25 MB
+
+
+@app.post("/api/answer")
+async def answer(
+    audio: Annotated[UploadFile, File()],
+    question: str = Form(..., min_length=1, max_length=1000),
+    level: int = Form(3, ge=1, le=6),
+    qtype: str | None = Form(None),
+    duration_sec: float | None = Form(None, ge=0, le=1800),
+):
+    """Recorded answer -> transcript -> feedback, in one request."""
+    data = await audio.read()
+    if len(data) < 1000:
+        raise HTTPException(status_code=400, detail="녹음된 소리가 없어요. 마이크를 확인해 주세요.")
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="녹음이 너무 길어요. 5분 이내로 답변해 주세요.")
+    content_type = (audio.content_type or "audio/webm").split(";")[0]
+    ext = {"audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mpeg": "mp3"}.get(content_type, "webm")
+    try:
+        transcript = await run_in_threadpool(coach.transcribe, data, f"answer.{ext}", content_type)
+    except coach.CoachError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    if len(transcript.split()) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail=f"영어 답변이 거의 인식되지 않았어요. 마이크 가까이에서 다시 말해 주세요. (인식: \"{transcript}\")",
+        )
+    try:
+        fb = await run_in_threadpool(coach.get_feedback, question, transcript, level, qtype, duration_sec)
+    except coach.CoachError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"transcript": transcript, "feedback": fb.model_dump()}
 
 
 # Service worker must be served from the root so it can control the whole app.

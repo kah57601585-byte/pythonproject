@@ -124,3 +124,19 @@ select { padding: 6px; border-radius: 8px; background: var(--bg); color: var(--t
   position: fixed; left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom));
   background: var(--text); color: var(--bg); padding: 12px 14px; border-radius: 10px; z-index: 10;
 }
+
+/* Mic level meter */
+.meter-wrap { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; }
+.meter { flex: 1; height: 14px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.meter-fill {
+  height: 100%; width: 0%; border-radius: 999px; background: var(--muted);
+  transition: width 60ms linear, background-color 120ms;
+}
+.meter-fill.voice { background: var(--good); }
+.voice-ind { font-size: 13px; min-width: 92px; text-align: right; color: var(--muted); }
+.voice-ind.on { color: var(--good); font-weight: 600; }
+.center { text-align: center; }
+.grow { flex: 1; min-width: 0; }
+#micSelect { padding: 10px; font-size: 15px; }
+audio { width: 100%; margin-top: 8px; }
+.transcript { white-space: pre-wrap; background: var(--bg); padding: 10px; border-radius: 10px; }
