@@ -5,10 +5,11 @@ Run:  uvicorn server:app --host 0.0.0.0 --port 8000   (from the opic_coach folde
 
 from __future__ import annotations
 
+import logging
 import os
 import random
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -32,6 +33,7 @@ def load_dotenv(path: Path) -> None:
 
 
 load_dotenv(BASE_DIR / ".env")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 import coach
 from questions import (
@@ -105,8 +107,13 @@ async def answer(
     level: int = Form(3, ge=1, le=6),
     qtype: str | None = Form(None),
     duration_sec: float | None = Form(None, ge=0, le=1800),
+    mode: Literal["english", "korean"] = Form("english"),
 ):
-    """Recorded answer -> transcript -> feedback, in one request."""
+    """Recorded answer -> transcript -> feedback, in one request.
+
+    mode="english": grade the English answer.
+    mode="korean": the learner answered in Korean; show how to say it in English.
+    """
     data = await audio.read()
     if len(data) < 1000:
         raise HTTPException(status_code=400, detail="녹음된 소리가 없어요. 마이크를 확인해 주세요.")
@@ -115,9 +122,24 @@ async def answer(
     content_type = (audio.content_type or "audio/webm").split(";")[0]
     ext = {"audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mpeg": "mp3"}.get(content_type, "webm")
     try:
-        transcript = await run_in_threadpool(coach.transcribe, data, f"answer.{ext}", content_type)
+        transcript = await run_in_threadpool(
+            coach.transcribe, data, f"answer.{ext}", content_type, "ko" if mode == "korean" else "en"
+        )
     except coach.CoachError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+    if mode == "korean":
+        if len(transcript.replace(" ", "")) < 5:
+            raise HTTPException(
+                status_code=422,
+                detail=f"한국어 답변이 거의 인식되지 않았어요. 마이크 가까이에서 다시 말해 주세요. (인식: \"{transcript}\")",
+            )
+        try:
+            coaching = await run_in_threadpool(coach.coach_korean, question, transcript, level, qtype)
+        except coach.CoachError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        return {"mode": "korean", "transcript": transcript, "coaching": coaching.model_dump()}
+
     if len(transcript.split()) < 3:
         raise HTTPException(
             status_code=422,
@@ -127,7 +149,7 @@ async def answer(
         fb = await run_in_threadpool(coach.get_feedback, question, transcript, level, qtype, duration_sec)
     except coach.CoachError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"transcript": transcript, "feedback": fb.model_dump()}
+    return {"mode": "english", "transcript": transcript, "feedback": fb.model_dump()}
 
 
 # Service worker must be served from the root so it can control the whole app.

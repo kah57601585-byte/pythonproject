@@ -330,19 +330,33 @@ function speak(text, onEnd) {
 let session = null;   // active recording: { stream, recorder, chunks, meter, timerId, seconds, cancelled }
 let submitting = false;
 
-function setRecButton(state) {
-  const btn = $("btnRec");
-  btn.classList.toggle("recording", state === "recording");
-  if (state === "idle") { btn.disabled = !current; btn.textContent = "🎤 답변 시작"; }
-  if (state === "recording") { btn.disabled = false; btn.textContent = "⏹ 답변 끝내기"; }
-  if (state === "submitting") { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 제출 중...'; }
+function setRecButton(state, mode = "english") {
+  const en = $("btnRec"), ko = $("btnRecKo");
+  const active = mode === "korean" ? ko : en;
+  const other = mode === "korean" ? en : ko;
+  en.classList.remove("recording"); ko.classList.remove("recording");
+  if (state === "idle") {
+    en.disabled = ko.disabled = !current;
+    en.classList.remove("hidden"); ko.classList.remove("hidden");
+    en.textContent = "🎤 영어로 답변 시작";
+    ko.textContent = "🇰🇷 한국어로 말하기";
+    return;
+  }
+  other.classList.add("hidden");
+  active.classList.remove("hidden");
+  if (state === "recording") {
+    active.disabled = false;
+    active.classList.add("recording");
+    active.textContent = mode === "korean" ? "⏹ 한국어 말하기 끝내기" : "⏹ 답변 끝내기";
+  }
+  if (state === "submitting") { active.disabled = true; active.innerHTML = '<span class="spinner"></span> 제출 중...'; }
 }
 
 function renderTimer(sec) {
   $("timer").textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-async function startRecording() {
+async function startRecording(mode = "english") {
   if (session || submitting || !current) return;
   if (!micSupported()) return;
   speechSynthesis.cancel();
@@ -356,7 +370,7 @@ async function startRecording() {
   }
   const mime = pickMimeType();
   const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-  const s = { stream, recorder, chunks: [], seconds: 0, cancelled: false,
+  const s = { stream, recorder, chunks: [], seconds: 0, cancelled: false, mode,
               meter: startMeter(stream, $("recMeter"), $("recVoice")) };
   recorder.ondataavailable = (ev) => ev.data.size && s.chunks.push(ev.data);
   recorder.start(1000);
@@ -364,8 +378,9 @@ async function startRecording() {
 
   const label = stream.getAudioTracks()[0]?.label;
   if (label) $("recMicName").textContent = `🎙️ 마이크: ${label}`;
-  $("recStatus").textContent = "🔴 녹음 중 — 영어로 답변하세요";
-  setRecButton("recording");
+  $("recStatus").textContent = mode === "korean"
+    ? "🔴 녹음 중 — 하고 싶은 말을 한국어로 하세요" : "🔴 녹음 중 — 영어로 답변하세요";
+  setRecButton("recording", mode);
   renderTimer(0);
   s.timerId = setInterval(() => {
     s.seconds++;
@@ -393,13 +408,13 @@ async function stopRecording({ cancel = false } = {}) {
     return null;
   }
   const type = s.recorder.mimeType || "audio/webm";
-  return { blob: new Blob(s.chunks, { type }), seconds: s.seconds, voiceMs: s.meter.stats.voiceMs };
+  return { blob: new Blob(s.chunks, { type }), seconds: s.seconds, voiceMs: s.meter.stats.voiceMs, mode: s.mode };
 }
 
 async function finishAnswer() {
   if (!session || submitting) return;
   submitting = true;
-  setRecButton("submitting");
+  setRecButton("submitting", session.mode);
   $("recStatus").textContent = "답변 제출 중...";
   const rec = await stopRecording();
   if (!rec) { submitting = false; return; }
@@ -407,8 +422,9 @@ async function finishAnswer() {
   if (rec.voiceMs < 500) {
     toast("목소리가 거의 감지되지 않았어요. 설정에서 마이크를 확인해 보세요.", 5000);
   }
-  $("feedback").innerHTML =
-    '<div class="card"><span class="spinner"></span> 답변을 글로 옮기고 평가하고 있어요... (10~30초)</div>';
+  $("feedback").innerHTML = rec.mode === "korean"
+    ? '<div class="card"><span class="spinner"></span> 한국어를 듣고 영어 답변을 만들고 있어요... (10~30초)</div>'
+    : '<div class="card"><span class="spinner"></span> 답변을 글로 옮기고 평가하고 있어요... (10~30초)</div>';
   $("feedback").scrollIntoView({ behavior: "smooth" });
 
   const form = new FormData();
@@ -418,34 +434,37 @@ async function finishAnswer() {
   form.append("level", String(settings.level));
   form.append("qtype", current.qtype);
   form.append("duration_sec", String(rec.seconds));
+  form.append("mode", rec.mode);
   try {
     const res = await api("/api/answer", form);
-    $("feedback").innerHTML = renderFeedback(res.feedback, res.transcript, rec.seconds);
+    const entry = { at: Date.now(), mode: res.mode, question: current, answer: res.transcript,
+                    seconds: rec.seconds, level: settings.level, fb: res.feedback, coaching: res.coaching };
+    $("feedback").innerHTML = renderResult(entry, true);
     $("recStatus").textContent = "제출 완료";
-    saveHistory({ at: Date.now(), question: current, answer: res.transcript, seconds: rec.seconds,
-                  level: settings.level, fb: res.feedback });
+    saveHistory(entry);
   } catch (e) {
     $("feedback").innerHTML = `<div class="card">⚠️ ${esc(e.message)}
-      <div class="row"><button class="btn primary" onclick="retrySameQuestion()">같은 질문 다시 답변</button></div></div>`;
+      <div class="row"><button class="btn primary" onclick="retrySameQuestion('${rec.mode}')">다시 말하기</button></div></div>`;
     $("recStatus").textContent = "제출 실패";
   } finally {
     submitting = false;
     setRecButton("idle");
-    $("btnRec").textContent = "🎤 같은 질문 다시 답변";
   }
 }
 
-function retrySameQuestion() {
+function retrySameQuestion(mode = "english") {
   $("feedback").innerHTML = "";
   window.scrollTo({ top: 0, behavior: "smooth" });
-  startRecording();
+  startRecording(mode);
 }
 
-$("btnRec").addEventListener("click", () => {
+function onRecButton(mode) {
   ensureAudioCtx();
   if (session) finishAnswer();
-  else { $("feedback").innerHTML = ""; startRecording(); }
-});
+  else { $("feedback").innerHTML = ""; startRecording(mode); }
+}
+$("btnRec").addEventListener("click", () => onRecButton("english"));
+$("btnRecKo").addEventListener("click", () => onRecButton("korean"));
 
 $("btnNewQ").addEventListener("click", async () => {
   ensureAudioCtx();
@@ -496,6 +515,40 @@ $("btnShowQ").addEventListener("click", () => {
   $("qPlaceholder").classList.toggle("hidden", !$("qText").classList.contains("hidden"));
 });
 
+// ---------- results ----------
+function speakButton(text, label) {
+  return `<button class="btn" onclick="speak(${esc(JSON.stringify(text))})">${label}</button>
+    <button class="btn ghost" onclick="speechSynthesis.cancel()">정지</button>`;
+}
+
+function renderResult(entry, live) {
+  if (entry.mode === "korean") return renderCoaching(entry.coaching, entry.answer, live);
+  return renderFeedback(entry.fb, entry.answer, entry.seconds);
+}
+
+function renderCoaching(c, korean, live) {
+  const pairs = c.sentence_pairs.map((p) => `
+    <div class="pair"><div class="ko">${esc(p.korean)}</div><div class="en">${esc(p.english)}</div></div>`).join("");
+  const exprs = c.key_expressions.map((k) => `
+    <div class="corr"><div>${esc(k.korean)} → <span class="to">${esc(k.english)}</span></div>
+    <div class="small muted">${esc(k.note_ko)}</div></div>`).join("");
+  return `
+  <div class="card">
+    <span class="mode-chip">🇰🇷 → 🇺🇸 한국어 답변 코칭</span>
+    <p>${esc(c.summary_ko)}</p>
+    <div class="fb-section"><h3>🗣️ 내가 한국어로 한 말</h3><div class="transcript">${esc(korean)}</div></div>
+    <div class="fb-section"><h3>🇺🇸 영어로 이렇게 말해 보세요</h3>
+      <div class="model-answer">${esc(c.english_answer)}</div>
+      <div class="row">${speakButton(c.english_answer, "🔊 영어 답변 듣기")}</div>
+    </div>
+    <div class="fb-section"><h3>🔁 문장별로 보기</h3>${pairs}</div>
+    <div class="fb-section"><h3>💡 핵심 표현</h3>${exprs || '<p class="muted">없음</p>'}</div>
+    <div class="fb-section"><h3>➕ 보충한 내용</h3><p>${esc(c.added_ideas_ko)}</p></div>
+    <div class="fb-section"><h3>🎯 팁</h3><p>${esc(c.tip_ko)}</p></div>
+    ${live ? `<div class="row"><button class="btn primary" onclick="retrySameQuestion('english')">🎤 이제 영어로 말해보기</button></div>` : ""}
+  </div>`;
+}
+
 // ---------- feedback ----------
 function renderFeedback(fb, transcript, seconds) {
   const list = (items) => items.length ? `<ul>${items.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : '<p class="muted">없음</p>';
@@ -523,8 +576,7 @@ function renderFeedback(fb, transcript, seconds) {
     <div class="fb-section"><h3>⏱️ 길이</h3><p>${esc(fb.length_feedback_ko)}</p></div>
     <div class="fb-section"><h3>📝 모범 답안</h3>
       <div class="model-answer">${esc(fb.model_answer)}</div>
-      <div class="row"><button class="btn" onclick="speak(${esc(JSON.stringify(fb.model_answer))})">🔊 모범 답안 듣기</button>
-      <button class="btn ghost" onclick="speechSynthesis.cancel()">정지</button></div>
+      <div class="row">${speakButton(fb.model_answer, "🔊 모범 답안 듣기")}</div>
     </div>
     <div class="fb-section"><h3>🎯 다음 연습 포인트</h3><p>${esc(fb.next_tip_ko)}</p></div>
   </div>`;
@@ -542,14 +594,14 @@ function renderHistory() {
   if (!hist.length) { $("historyList").innerHTML = '<p class="muted">아직 기록이 없어요.</p>'; return; }
   $("historyList").innerHTML = hist.map((h, i) => `
     <details class="hist-item">
-      <summary><b>${esc(h.fb.estimated_grade)}</b> · ${esc(h.question.qtype_label)} · ${new Date(h.at).toLocaleString("ko-KR")}</summary>
+      <summary><b>${h.mode === "korean" ? "🇰🇷→🇺🇸" : esc(h.fb.estimated_grade)}</b> · ${esc(h.question.qtype_label)} · ${new Date(h.at).toLocaleString("ko-KR")}</summary>
       <p class="small"><b>Q.</b> ${esc(h.question.text)}</p>
       <div data-fb="${i}"></div>
     </details>`).join("");
   $("historyList").querySelectorAll("details").forEach((d, i) =>
     d.addEventListener("toggle", () => {
       const slot = d.querySelector("[data-fb]");
-      if (d.open && !slot.innerHTML) slot.innerHTML = renderFeedback(hist[i].fb, hist[i].answer, hist[i].seconds);
+      if (d.open && !slot.innerHTML) slot.innerHTML = renderResult(hist[i], false);
     }));
 }
 $("btnClearHistory").addEventListener("click", () => {

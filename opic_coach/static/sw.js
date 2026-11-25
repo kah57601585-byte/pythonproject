@@ -1,5 +1,5 @@
 // Caches the app shell so it opens instantly; API calls always go to the network.
-const CACHE = "opic-coach-v2";
+const CACHE = "opic-coach-v3";
 const SHELL = ["/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {

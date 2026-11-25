@@ -140,3 +140,10 @@ select { padding: 6px; border-radius: 8px; background: var(--bg); color: var(--t
 #micSelect { padding: 10px; font-size: 15px; }
 audio { width: 100%; margin-top: 8px; }
 .transcript { white-space: pre-wrap; background: var(--bg); padding: 10px; border-radius: 10px; }
+
+.btn.rec-ko { width: 100%; padding: 12px; font-size: 16px; margin: 0 0 10px; }
+.btn.rec-ko.recording { background: var(--rec); color: #fff; border-color: var(--rec); animation: pulse 1.4s infinite; }
+.pair { padding: 8px 10px; border-radius: 10px; background: var(--bg); margin-bottom: 6px; }
+.pair .ko { color: var(--muted); font-size: 14px; }
+.pair .en { font-weight: 600; }
+.mode-chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--soft); }

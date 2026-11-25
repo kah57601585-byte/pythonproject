@@ -110,8 +110,8 @@ def _fake_feedback():
 def test_answer_endpoint_transcribes_then_grades(client, monkeypatch):
     seen = {}
 
-    def fake_transcribe(audio, filename, content_type):
-        seen.update(size=len(audio), filename=filename, content_type=content_type)
+    def fake_transcribe(audio, filename, content_type, language="en"):
+        seen.update(size=len(audio), filename=filename, content_type=content_type, language=language)
         return "I usually go to the park on weekends with my dog."
 
     def fake_feedback(question, answer, level, qtype, duration):
@@ -130,6 +130,7 @@ def test_answer_endpoint_transcribes_then_grades(client, monkeypatch):
     assert body["transcript"].startswith("I usually go")
     assert body["feedback"]["estimated_grade"] == "IH"
     assert seen["filename"] == "answer.webm" and seen["content_type"] == "audio/webm"
+    assert seen["language"] == "en" and body["mode"] == "english"
     assert seen["answer"] == body["transcript"] and seen["level"] == 5 and seen["duration"] == 61
 
 
@@ -145,3 +146,56 @@ def test_answer_rejects_when_nothing_recognized(client, monkeypatch):
     res = client.post("/api/answer", files={"audio": ("a.webm", b"\x1a" * 5000, "audio/webm")}, data={"question": "Q?"})
     assert res.status_code == 422
     assert not called
+
+
+def test_korean_mode_transcribes_korean_and_coaches(client, monkeypatch):
+    seen = {}
+
+    def fake_transcribe(audio, filename, content_type, language="en"):
+        seen["language"] = language
+        return "음 저는 주말에 보통 집 근처 공원에 가서 강아지랑 산책해요"
+
+    def fake_coach(question, korean, level, qtype):
+        seen.update(korean=korean, level=level)
+        return coach.KoreanCoaching(
+            summary_ko="주말 공원 산책", english_answer="Well, on weekends I usually go to a park near my house...",
+            sentence_pairs=[coach.SentencePair(korean="주말에 공원에 가요", english="On weekends, I go to the park.")],
+            key_expressions=[coach.KeyExpression(korean="~하는 편이에요", english="I tend to ~", note_ko="습관")],
+            added_ideas_ko="-", tip_ko="-",
+        )
+
+    monkeypatch.setattr(coach, "transcribe", fake_transcribe)
+    monkeypatch.setattr(coach, "coach_korean", fake_coach)
+    monkeypatch.setattr(coach, "get_feedback", lambda *a: pytest.fail("should not grade Korean"))
+    res = client.post(
+        "/api/answer",
+        files={"audio": ("a.webm", b"\x1a" * 5000, "audio/webm")},
+        data={"question": "Tell me about a park.", "level": "4", "mode": "korean"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["mode"] == "korean" and seen["language"] == "ko" and seen["level"] == 4
+    assert body["coaching"]["english_answer"].startswith("Well")
+    assert body["transcript"] == seen["korean"]
+
+
+def test_korean_mode_rejects_empty_transcript(client, monkeypatch):
+    monkeypatch.setattr(coach, "transcribe", lambda *a: "음")
+    res = client.post("/api/answer", files={"audio": ("a.webm", b"\x1a" * 5000, "audio/webm")},
+                      data={"question": "Q?", "mode": "korean"})
+    assert res.status_code == 422
+
+
+def test_rate_limit_messages_distinguish_quota_from_throttling():
+    import httpx2
+    import openai
+
+    def err(code, msg):
+        req = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+        resp = httpx2.Response(429, request=req)
+        return openai.RateLimitError(msg, response=resp, body={"code": code, "message": msg})
+
+    quota = coach._rate_limit_error(err("insufficient_quota", "You exceeded your current quota"))
+    assert "크레딧" in str(quota) and "Billing" in str(quota)
+    busy = coach._rate_limit_error(err("rate_limit_exceeded", "Rate limit reached"))
+    assert "크레딧" not in str(busy)
