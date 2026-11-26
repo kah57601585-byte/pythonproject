@@ -310,3 +310,36 @@ def test_mixed_answer_needs_some_korean(client, monkeypatch):
                       files=[("audio", ("a.webm", audio, "audio/webm")), ("audio", ("b.webm", audio, "audio/webm"))],
                       data={"langs": "en,ko", "question": "Q?"})
     assert res.status_code == 422
+
+
+def test_index_page_carries_version_and_cache_busting(client):
+    import version
+
+    res = client.get("/")
+    assert res.status_code == 200
+    assert res.headers["cache-control"] == "no-store"
+    html = res.text
+    assert f'<meta name="app-version" content="{version.APP_VERSION}">' in html
+    assert f'src="app.js?v={version.BUILD}"' in html and f'href="style.css?v={version.BUILD}"' in html
+    meta = client.get("/api/meta").json()
+    assert meta["version"] == version.APP_VERSION
+
+
+def test_version_hash_ignores_line_endings(tmp_path, monkeypatch):
+    import version
+
+    (tmp_path / "server.py").write_bytes(b"a\r\nb\r\n")
+    monkeypatch.setattr(version, "_BASE", tmp_path)
+    crlf = version._build_hash()
+    (tmp_path / "server.py").write_bytes(b"a\nb\n")
+    assert version._build_hash() == crlf
+
+
+def test_windows_scripts_have_crlf_and_bom():
+    from pathlib import Path
+
+    base = Path(__file__).resolve().parent
+    for name in ("run_windows.bat", "setup_windows.bat", "update_windows.bat", "update_windows.ps1"):
+        data = (base / name).read_bytes()
+        assert b"\r\n" in data and b"\n" not in data.replace(b"\r\n", b""), name
+    assert (base / "update_windows.ps1").read_bytes().startswith(b"\xef\xbb\xbf")

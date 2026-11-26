@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -79,6 +79,10 @@ def mask(key: str) -> str:
     return f"{key[:7]}...{key[-4:]}" if len(key) > 12 else "(짧음)"
 
 
+from version import APP_VERSION, BUILD, RELEASE
+
+log.info("==== OPIc Coach 버전 %s ====", APP_VERSION)
+log.info("실행 폴더: %s", BASE_DIR)
 log.info("환경 파일: %s", ENV_FILE or "없음 (opic_coach 폴더에 .env 를 만들어 주세요)")
 if ENV_FILE and ENV_FILE.name != ".env":
     log.warning("'%s' 파일을 읽었어요. 이름을 '.env' 로 바꾸는 것을 권장해요.", ENV_FILE.name)
@@ -131,6 +135,8 @@ def meta():
         "survey_min_activities": SURVEY_MIN_ACTIVITIES,
         "question_types": QUESTION_TYPES,
         "model": coach.MODEL,
+        "version": APP_VERSION,
+        "release": RELEASE,
     }
 
 
@@ -284,10 +290,25 @@ async def answer_mixed(
     return {"mode": "mixed", "segments": segments, "transcript": transcript, "mixed": result.model_dump()}
 
 
+def _index_html() -> str:
+    html = (BASE_DIR / "static" / "index.html").read_text(encoding="utf-8")
+    html = html.replace('href="style.css"', f'href="style.css?v={BUILD}"')
+    html = html.replace('src="app.js"', f'src="app.js?v={BUILD}"')
+    return html.replace("<head>", f'<head>\n  <meta name="app-version" content="{APP_VERSION}">', 1)
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+def index():
+    # Never cache the page itself, so a new version always shows up after a restart.
+    return HTMLResponse(_index_html(), headers={"Cache-Control": "no-store"})
+
+
 # Service worker must be served from the root so it can control the whole app.
 @app.get("/sw.js", include_in_schema=False)
 def service_worker():
-    return FileResponse(BASE_DIR / "static" / "sw.js", media_type="application/javascript")
+    return FileResponse(BASE_DIR / "static" / "sw.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-store"})
 
 
 class NoCacheStatic(StaticFiles):

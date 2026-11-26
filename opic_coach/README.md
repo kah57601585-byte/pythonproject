@@ -19,7 +19,9 @@ OPIc 시험 연습용 영어 말하기 앱이에요. 집 윈도우 PC에서 서�
 ## 1. 윈도우 PC 준비 (처음 한 번)
 
 1. **Python 설치**: https://www.python.org/downloads/ 에서 설치합니다. 설치 화면의 **"Add python.exe to PATH"** 를 꼭 체크하세요.
-2. **이 저장소 받기**: GitHub에서 Code → Download ZIP으로 받아 압축을 풀거나 `git clone` 하세요.
+2. **코드 받기**: 이 앱은 `main` 이 아니라 **`ccr-bbb459a1-ex8kfh` 브랜치**에 있어요. GitHub 첫 화면의 Download ZIP은 `main` 이라서 앱이 들어 있지 않아요.
+   - ZIP: https://github.com/kah57601585-byte/pythonproject/archive/refs/heads/ccr-bbb459a1-ex8kfh.zip 을 받아 압축을 풉니다.
+   - 또는 git: `git clone -b ccr-bbb459a1-ex8kfh https://github.com/kah57601585-byte/pythonproject.git`
 3. `opic_coach` 폴더의 **`setup_windows.bat`** 을 더블클릭합니다. 가상환경을 만들고 필요한 패키지를 설치해요.
 4. **API 키 넣기**
    - https://platform.openai.com/api-keys 에서 API 키를 발급합니다. Billing 메뉴에서 크레딧을 충전해야 동작해요. ChatGPT Plus 구독과는 별개예요.
@@ -30,6 +32,20 @@ OPIc 시험 연습용 영어 말하기 앱이에요. 집 윈도우 PC에서 서�
 5. **`run_windows.bat`** 을 더블클릭하면 서버가 켜집니다. 이 창이 열려 있는 동안만 앱을 쓸 수 있어요.
    - PC 브라우저에서 http://localhost:8000 을 열어 화면이 나오면 성공입니다.
    - 윈도우 방화벽 허용 창이 뜨면 "허용"을 누르세요.
+
+## 최신 버전으로 업데이트하기
+
+1. `opic_coach` 폴더의 **`update_windows.bat`** 을 더블클릭합니다.
+   - GitHub에서 최신 코드를 받아요. git이 있으면 git으로, 없으면 ZIP으로 받아요.
+   - 실행 중인 예전 서버를 끄고, 패키지를 설치해요.
+   - `.env`(API 키)는 건드리지 않아요.
+2. **`run_windows.bat`** 으로 서버를 켭니다.
+3. 반영됐는지 확인하는 방법:
+   - 서버 창 첫 줄에 `==== OPIc Coach 버전 2026-11-26.2+... ====` 처럼 버전이 나와요.
+   - 앱 제목 옆과 **설정 → ℹ️ 앱 정보**에 같은 버전이 보이면 최신이에요.
+   - 화면이 예전 버전이면 앱이 자동으로 한 번 새로고침해요. 그래도 ⚠️가 보이면 PC는 `Ctrl+Shift+R`, 폰은 앱을 완전히 닫았다 여세요.
+
+> `update_windows.bat` 이 없는 예전 버전이라면, 위의 ZIP 링크로 새로 받아서 압축을 풀고 예전 폴더의 `.env` 파일을 새 `opic_coach` 폴더로 복사한 뒤 `setup_windows.bat` → `run_windows.bat` 순서로 실행하세요.
 
 ## 2. 폰에서 접속하기: Tailscale (추천)
 
@@ -95,6 +111,7 @@ OPIc 시험 연습용 영어 말하기 앱이에요. 집 윈도우 PC에서 서�
 
 | 증상 | 해결 |
 |---|---|
+| 고쳤다는데 화면이 그대로임 | 서버 창의 버전과 **설정 → ℹ️ 앱 정보**의 버전을 비교하세요. 서버 버전이 옛날이면 `update_windows.bat` 을 실행하세요. 서버를 두 번 켜서 예전 서버가 계속 돌고 있을 수도 있는데, 이제 `run_windows.bat` 이 예전 서버를 자동으로 꺼요. |
 | "서버에 연결할 수 없어요" | PC에서 `run_windows.bat` 창이 켜져 있는지, 폰의 Tailscale이 연결돼 있는지 확인하세요. |
 | 마이크가 안 됨 | HTTPS 주소인지 확인하세요. 주소창 자물쇠 → 권한 → 마이크 허용. 설정 탭의 마이크 테스트로 확인하세요. |
 | 원하는 마이크가 목록에 없음 | 블루투스·유선 이어폰을 연결한 뒤 **새로고침**을 누르세요. 안드로이드는 기기에 따라 "기본 마이크"만 보일 수 있어요. |

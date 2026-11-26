@@ -815,6 +815,35 @@ $("btnClearHistory").addEventListener("click", () => {
   if (confirm("연습 기록을 모두 삭제할까요?")) { store.set("history", []); renderHistory(); }
 });
 
+// ---------- version / stale cache ----------
+const PAGE_VERSION = document.querySelector('meta[name="app-version"]')?.content || "(구버전 페이지)";
+
+/** If the browser shows an older page than the server runs, clear caches and reload once. */
+async function reloadIfStale(serverVersion) {
+  if (!serverVersion || serverVersion === PAGE_VERSION) return false;
+  let tried = null;
+  try { tried = sessionStorage.getItem("reloadedFor"); } catch {}
+  if (tried === serverVersion) return false;  // already tried once; avoid a reload loop
+  try { sessionStorage.setItem("reloadedFor", serverVersion); } catch {}
+  try {
+    const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+    await Promise.all(regs.map((r) => r.unregister()));
+    const keys = await caches?.keys?.() || [];
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  } catch {}
+  location.reload();
+  return true;
+}
+
+function renderVersion() {
+  $("verTag").textContent = `v${meta.release}`;
+  const same = meta.version === PAGE_VERSION;
+  $("appInfo").innerHTML = `서버 버전: <b>${esc(meta.version)}</b><br>화면 버전: <b>${esc(PAGE_VERSION)}</b> ${
+    same ? '<span class="ok-text">✓ 최신</span>'
+         : '<span class="bad-text">⚠️ 화면이 예전 버전이에요. Ctrl+Shift+R(PC) 또는 앱을 완전히 닫았다 열어 주세요.</span>'
+  }<br>AI 모델: ${esc(meta.model)}`;
+}
+
 // ---------- init ----------
 (async function init() {
   if ("speechSynthesis" in window) speechSynthesis.getVoices(); // warm up voice list
@@ -822,6 +851,8 @@ $("btnClearHistory").addEventListener("click", () => {
   renderMicName();
   try {
     meta = await api("/api/meta");
+    if (await reloadIfStale(meta.version)) return;
+    renderVersion();
     renderSetup();
     saveSurvey();
     renderBadge();
