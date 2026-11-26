@@ -63,6 +63,25 @@ class KoreanCoaching(BaseModel):
     tip_ko: str
 
 
+class StuckPart(BaseModel):
+    korean: str = Field(description="What the learner said in Korean when they got stuck (cleaned up)")
+    english: str = Field(description="How to say it in natural spoken English, fitting right after the preceding English")
+    note_ko: str = Field(description="Short Korean note: the key word/pattern they were missing")
+
+
+class MixedCoaching(BaseModel):
+    estimated_grade: Grade = Field(description="Grade for the English parts only")
+    overall_comment_ko: str
+    stuck_parts: list[StuckPart] = Field(description="One entry per Korean segment, in order")
+    full_answer_en: str = Field(
+        description="The learner's whole answer in English: their English parts lightly corrected, "
+        "plus the Korean parts translated, joined into one natural spoken answer"
+    )
+    corrections: list[Correction] = Field(description="Errors in the learner's own English parts only")
+    key_expressions: list[KeyExpression]
+    tip_ko: str
+
+
 class GeneratedQuestion(BaseModel):
     text: str
 
@@ -99,6 +118,17 @@ Rules:
 - key_expressions: 3-6 useful expressions from the answer that Korean learners often can't produce (e.g. "~하는 편이에요" -> "I tend to ~"), with a short Korean note.
 - added_ideas_ko: in Korean, briefly say what you added or changed to make it a complete OPIc answer (or say nothing was added).
 - summary_ko and tip_ko in natural, friendly Korean. tip_ko: one concrete tip for saying this answer in English."""
+
+SYSTEM_MIXED = """You are an OPIc (Oral Proficiency Interview - computer) English speaking coach for Korean learners.
+The learner started answering in English, and whenever they got stuck they switched to KOREAN, sometimes switching back to English.
+You get their answer as ordered segments marked [EN] or [KO]. Speech recognition may contain glitches and fillers; ignore those.
+
+Your job:
+- stuck_parts: for EVERY [KO] segment, in order, give `korean` (cleaned up), `english` = how to say exactly that idea in natural spoken English that fits right after the English before it, and `note_ko` = the key word or pattern they were missing (in Korean, e.g. "'~하는 편이다'는 tend to").
+- full_answer_en: their whole answer as one natural spoken English answer, in order: keep their own English parts (fix only real errors), and put your translations where the Korean was. Do not add new content beyond a short wrap-up sentence if it ends abruptly. Spoken style, at the learner's TARGET level.
+- estimated_grade and corrections: judge ONLY the learner's own [EN] segments. corrections: up to 5 real errors (grammar, word choice, tense) from the [EN] parts; empty list if none.
+- key_expressions: 2-5 expressions that would have helped them avoid getting stuck, with Korean notes.
+- overall_comment_ko and tip_ko: friendly natural Korean. Mention how much they managed in English and encourage them; tip_ko is one concrete thing to practice so they don't get stuck at the same point."""
 
 SYSTEM_QUESTION = """You write OPIc-style English interview questions. Return only the question text the examiner would read aloud, in English, 1-3 sentences, in the style of the real OPIc test (e.g. "You indicated that you ... Tell me ..."). Combine multiple sub-questions where natural."""
 
@@ -273,6 +303,23 @@ def coach_korean(question: str, korean: str, level: int, qtype: str | None = Non
         f"Learner's answer in Korean (speech-to-text):\n<answer>\n{korean}\n</answer>",
     ])
     return _parse(SYSTEM_KOREAN, user, KoreanCoaching, max_tokens=8000)
+
+
+def coach_mixed(question: str, segments: list[tuple[str, str]], level: int, qtype: str | None = None,
+                duration_sec: float | None = None) -> MixedCoaching:
+    """segments: ordered (lang, text) pairs with lang "en" or "ko"."""
+    level = clamp_level(level)
+    info = LEVEL_INFO[level]
+    body = "\n".join(f"[{lang.upper()}] {text}" for lang, text in segments)
+    parts = [
+        f"Self-assessment level: {level} (target grade {info['target']})",
+        f"Question type: {QUESTION_TYPES.get(qtype or '', 'unknown')}",
+        f"Question: {question}",
+    ]
+    if duration_sec:
+        parts.append(f"Total speaking time: {int(duration_sec)} seconds")
+    parts.append(f"Learner's answer segments (speech-to-text):\n<answer>\n{body}\n</answer>")
+    return _parse(SYSTEM_MIXED, "\n".join(parts), MixedCoaching, max_tokens=8000)
 
 
 def generate_question(level: int, topic: str, qtype: str) -> str:

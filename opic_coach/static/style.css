@@ -174,3 +174,12 @@ audio { width: 100%; margin-top: 8px; }
 @media (prefers-color-scheme: dark) { .banner { background: #3a1717; color: #ffb4b4; border-color: #5c2626; } }
 .ok-text { color: var(--good); }
 .bad-text { color: var(--bad); }
+
+/* Mixed-language answers */
+.btn.rec-ko.ko-active { background: #fff4e5; border-color: #f0b35b; color: #8a4b00; }
+@media (prefers-color-scheme: dark) { .btn.rec-ko.ko-active { background: #3a2a12; border-color: #8a5a1a; color: #ffcc80; } }
+.seg-trail { font-size: 13px; color: var(--muted); margin-top: 4px; min-height: 1em; word-break: keep-all; }
+.seg { padding: 8px 10px; border-radius: 10px; margin-bottom: 6px; background: var(--bg); }
+.seg.ko { background: #fff4e5; }
+@media (prefers-color-scheme: dark) { .seg.ko { background: #3a2a12; } }
+.seg-flag { margin-right: 6px; }

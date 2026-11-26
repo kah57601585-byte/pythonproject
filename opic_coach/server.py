@@ -232,6 +232,58 @@ async def answer(
     return {"mode": "english", "transcript": transcript, "feedback": fb.model_dump()}
 
 
+def _audio_name(upload: UploadFile, index: int) -> tuple[str, str]:
+    content_type = (upload.content_type or "audio/webm").split(";")[0]
+    ext = {"audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mpeg": "mp3"}.get(content_type, "webm")
+    return f"part{index}.{ext}", content_type
+
+
+@app.post("/api/answer/mixed")
+async def answer_mixed(
+    audio: Annotated[list[UploadFile], File()],
+    langs: str = Form(..., description="Comma-separated language of each audio part, e.g. en,ko,en"),
+    question: str = Form(..., min_length=1, max_length=1000),
+    level: int = Form(3, ge=1, le=6),
+    qtype: str | None = Form(None),
+    duration_sec: float | None = Form(None, ge=0, le=1800),
+):
+    """English answer with Korean parts where the learner got stuck -> translate the Korean, grade the English."""
+    if problem := api_key_problem():
+        raise HTTPException(status_code=503, detail=problem)
+    lang_list = [x.strip() for x in langs.split(",")]
+    if len(lang_list) != len(audio) or any(lang not in ("en", "ko") for lang in lang_list):
+        raise HTTPException(status_code=400, detail="음성 구간 정보가 올바르지 않아요.")
+    if len(audio) > 20:
+        raise HTTPException(status_code=400, detail="언어 전환이 너무 많아요.")
+
+    datas = [await a.read() for a in audio]
+    if sum(len(d) for d in datas) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="녹음이 너무 길어요. 5분 이내로 답변해 주세요.")
+
+    segments: list[dict] = []
+    for i, (upload, data, lang) in enumerate(zip(audio, datas, lang_list)):
+        if len(data) < 1000:  # accidental tap: too short to contain speech
+            continue
+        name, content_type = _audio_name(upload, i)
+        try:
+            text = await run_in_threadpool(coach.transcribe, data, name, content_type, lang)
+        except coach.CoachError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        if text.strip():
+            segments.append({"lang": lang, "text": text.strip()})
+
+    if not any(seg["lang"] == "ko" and len(seg["text"].replace(" ", "")) >= 2 for seg in segments):
+        raise HTTPException(status_code=422, detail="한국어로 말한 부분이 인식되지 않았어요. 마이크 가까이에서 다시 말해 주세요.")
+    try:
+        result = await run_in_threadpool(
+            coach.coach_mixed, question, [(seg["lang"], seg["text"]) for seg in segments], level, qtype, duration_sec
+        )
+    except coach.CoachError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    transcript = "\n".join(("🇰🇷 " if seg["lang"] == "ko" else "🇺🇸 ") + seg["text"] for seg in segments)
+    return {"mode": "mixed", "segments": segments, "transcript": transcript, "mixed": result.model_dump()}
+
+
 # Service worker must be served from the root so it can control the whole app.
 @app.get("/sw.js", include_in_schema=False)
 def service_worker():

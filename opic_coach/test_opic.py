@@ -249,3 +249,64 @@ def test_rate_limit_messages_distinguish_quota_from_throttling():
     assert "크레딧" in str(quota) and "Billing" in str(quota)
     busy = coach._rate_limit_error(err("rate_limit_exceeded", "Rate limit reached"))
     assert "크레딧" not in str(busy)
+
+
+def _fake_mixed():
+    return coach.MixedCoaching(
+        estimated_grade="IM1", overall_comment_ko="잘했어요",
+        stuck_parts=[coach.StuckPart(korean="강아지랑 산책해요", english="I take a walk with my dog.", note_ko="take a walk")],
+        full_answer_en="I usually go to the park. I take a walk with my dog.",
+        corrections=[], key_expressions=[], tip_ko="-",
+    )
+
+
+def test_mixed_answer_transcribes_each_segment_in_its_language(client, monkeypatch):
+    calls = []
+
+    def fake_transcribe(audio, filename, content_type, language="en"):
+        calls.append((filename, language))
+        return {"en": "I usually go to the park", "ko": "강아지랑 산책해요"}[language]
+
+    got = {}
+
+    def fake_mixed(question, segments, level, qtype, duration):
+        got.update(segments=segments, level=level, duration=duration)
+        return _fake_mixed()
+
+    monkeypatch.setattr(coach, "transcribe", fake_transcribe)
+    monkeypatch.setattr(coach, "coach_mixed", fake_mixed)
+    audio = b"\x1a" * 5000
+    res = client.post(
+        "/api/answer/mixed",
+        files=[("audio", ("a.webm", audio, "audio/webm")), ("audio", ("b.webm", audio, "audio/webm")),
+               ("audio", ("c.webm", b"x", "audio/webm"))],
+        data={"langs": "en,ko,en", "question": "Tell me about a park.", "level": "4", "duration_sec": "50"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["mode"] == "mixed"
+    # the tiny third part (accidental tap) is skipped
+    assert [c[1] for c in calls] == ["en", "ko"]
+    assert got["segments"] == [("en", "I usually go to the park"), ("ko", "강아지랑 산책해요")]
+    assert body["mixed"]["stuck_parts"][0]["english"] == "I take a walk with my dog."
+    assert "🇰🇷 강아지랑 산책해요" in body["transcript"]
+
+
+def test_mixed_answer_validates_langs(client):
+    audio = b"\x1a" * 5000
+    res = client.post("/api/answer/mixed", files=[("audio", ("a.webm", audio, "audio/webm"))],
+                      data={"langs": "en,ko", "question": "Q?"})
+    assert res.status_code == 400
+    res = client.post("/api/answer/mixed", files=[("audio", ("a.webm", audio, "audio/webm"))],
+                      data={"langs": "fr", "question": "Q?"})
+    assert res.status_code == 400
+
+
+def test_mixed_answer_needs_some_korean(client, monkeypatch):
+    monkeypatch.setattr(coach, "transcribe", lambda a, f, c, language="en": "" if language == "ko" else "I like it")
+    monkeypatch.setattr(coach, "coach_mixed", lambda *a: pytest.fail("should not coach"))
+    audio = b"\x1a" * 5000
+    res = client.post("/api/answer/mixed",
+                      files=[("audio", ("a.webm", audio, "audio/webm")), ("audio", ("b.webm", audio, "audio/webm"))],
+                      data={"langs": "en,ko", "question": "Q?"})
+    assert res.status_code == 422
