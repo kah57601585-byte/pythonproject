@@ -7,7 +7,7 @@ files the server and browser load, so a stale copy or a stale browser cache is d
 import hashlib
 from pathlib import Path
 
-RELEASE = "2026-11-26.2"
+RELEASE = "2026-11-27.1"
 
 _BASE = Path(__file__).resolve().parent
 _FILES = [
